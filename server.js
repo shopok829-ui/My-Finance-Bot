@@ -6,9 +6,8 @@ const io = require('socket.io')(http);
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const axios = require('axios');
-const path = require('path'); // مكتبة لتحديد المسارات بدقة
+const path = require('path');
 
-// قراءة المتغيرات
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const SHEET_URL = process.env.SHEET_URL; 
 
@@ -16,11 +15,12 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: '/opt/render/project/src/.wwebjs_auth' }),
     puppeteer: {
         headless: true,
+        // 👇 هذا هو السطر السحري الذي سيحل المشكلة
+        executablePath: '/usr/bin/google-chrome-stable',
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--single-process', '--disable-gpu']
     }
 });
 
-// هذا السطر هو الإصلاح 👇
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -28,11 +28,24 @@ app.get('/', (req, res) => {
 app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
-    socket.on('start_session', () => { client.initialize(); });
+    console.log('User connected to UI');
+    socket.on('start_session', () => { 
+        console.log('Starting WhatsApp client...');
+        client.initialize().catch(err => console.error("Initialization Error:", err));
+    });
 });
 
-client.on('qr', (qr) => { QRCode.toDataURL(qr, (err, url) => { io.emit('qr', url); }); });
-client.on('ready', () => { io.emit('ready', 'Connected'); console.log('Ready!'); });
+client.on('qr', (qr) => { 
+    console.log('QR Code received!');
+    QRCode.toDataURL(qr, (err, url) => { 
+        io.emit('qr', url); 
+    }); 
+});
+
+client.on('ready', () => { 
+    console.log('Client is ready!');
+    io.emit('ready', 'Connected'); 
+});
 
 client.on('message', async msg => {
     const chat = await msg.getChat();
