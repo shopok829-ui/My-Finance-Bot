@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>مساعد جواد المالي</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; }
+        .container { background: white; max-width: 400px; margin: auto; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        button { background: #25D366; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px;}
+        #qr-image { margin-top: 20px; border: 1px solid #ddd; max-width: 100%; }
+        #logs { text-align: right; background: #333; color: #0f0; padding: 10px; height: 150px; overflow-y: scroll; margin-top: 20px; font-size: 12px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🤖 بوت المصاريف</h2>
+        <p id="status">غير متصل</p>
+        <button onclick="start()">🔗 ربط واتساب</button>
+        <div id="qr-area" style="display:none">
+            <p>امسح الكود:</p>
+            <img id="qr-image" src="">
+        </div>
+        <div id="logs"></div>
+    </div>
+    <script>
+        const socket = io();
+        function start() { socket.emit('start_session'); document.getElementById('status').innerText = "جاري طلب الباركود..."; }
+        socket.on('qr', (url) => { 
+            document.getElementById('qr-area').style.display = 'block';
+            document.getElementById('qr-image').src = url;
+            document.getElementById('status').innerText = "امسح الكود الآن!";
+        });
+        socket.on('ready', () => { 
+            document.getElementById('qr-area').style.display = 'none';
+            document.getElementById('status').innerText = "✅ متصل وجاهز";
+        });
+        socket.on('log', (msg) => {
+            let logs = document.getElementById('logs');
+            logs.innerHTML = "<div>" + msg + "</div>" + logs.innerHTML;
+        });
+    </script>
+</body>
+</html>
