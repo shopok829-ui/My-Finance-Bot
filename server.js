@@ -11,13 +11,24 @@ const path = require('path');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const SHEET_URL = process.env.SHEET_URL; 
 
+// متغير لمنع التشغيل المزدوج
+let isClientInitialized = false;
+
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: '/opt/render/project/src/.wwebjs_auth' }),
+    // 🔴 التغيير هنا: حذفنا مسار dataPath لنستخدم الوضع المؤقت الآمن
+    authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        // 👇 هذا هو السطر السحري الذي سيحل المشكلة
         executablePath: '/usr/bin/google-chrome-stable',
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--single-process', '--disable-gpu']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--single-process',
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -29,9 +40,18 @@ app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
     console.log('User connected to UI');
+    
     socket.on('start_session', () => { 
-        console.log('Starting WhatsApp client...');
-        client.initialize().catch(err => console.error("Initialization Error:", err));
+        if (!isClientInitialized) {
+            console.log('Starting WhatsApp client...');
+            isClientInitialized = true;
+            client.initialize().catch(err => {
+                console.error("Initialization Error:", err);
+                isClientInitialized = false; // إعادة ضبط في حال الفشل
+            });
+        } else {
+            console.log('Client already running, ignoring start request.');
+        }
     });
 });
 
