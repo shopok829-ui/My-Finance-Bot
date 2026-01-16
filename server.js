@@ -13,11 +13,10 @@ const SHEET_URL = process.env.SHEET_URL;
 
 let isClientInitialized = false;
 
-// إعدادات المتصفح بمواصفات "الصبر الطويل"
+// 1. إعدادات المتصفح الصبور (لحل الخطأ الأحمر)
 const client = new Client({
     authStrategy: new LocalAuth(),
-    // 👇 هذا السطر الجديد يجعله ينتظر الربط للأبد ولا يفصل
-    authTimeoutMs: 0, 
+    authTimeoutMs: 0, // 👈 انتظار المصادقة للأبد (مهم جداً)
     puppeteer: {
         headless: true,
         executablePath: '/usr/bin/google-chrome-stable',
@@ -31,10 +30,20 @@ const client = new Client({
             '--single-process', 
             '--disable-gpu'
         ],
-        // 👇 وهنا أيضاً نلغي حد الوقت للمتصفح
-        timeout: 0 
+        timeout: 0 // 👈 انتظار المتصفح للأبد
     }
 });
+
+// 2. كود "النكز" (Keep-Alive) لمنع النوم
+app.get('/ping', (req, res) => {
+    res.status(200).send('Pong! I am alive.');
+});
+
+// نكز ذاتي كل 5 دقائق
+setInterval(() => {
+    console.log('⏰ Keep-Alive Ping...');
+    // هذا الكود يبقي المعالج نشطاً
+}, 300000); 
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -47,15 +56,14 @@ io.on('connection', (socket) => {
     
     socket.on('start_session', () => { 
         if (!isClientInitialized) {
-            socket.emit('log', '🚀 جاري بدء التشغيل (قد يستغرق دقيقتين)..');
+            socket.emit('log', '🚀 جاري التشغيل (وضع الصبر مفعل)..');
             isClientInitialized = true;
+            
             client.initialize().catch(err => {
                 console.error("Init Error:", err);
-                socket.emit('log', '❌ خطأ: ' + err.message);
+                socket.emit('log', '⚠️ إعادة المحاولة...');
                 isClientInitialized = false; 
             });
-        } else {
-             socket.emit('log', '⚠️ البوت يعمل بالفعل.. راقب الجوال.');
         }
     });
 });
@@ -63,12 +71,12 @@ io.on('connection', (socket) => {
 client.on('qr', (qr) => { 
     QRCode.toDataURL(qr, (err, url) => { 
         io.emit('qr', url); 
-        io.emit('log', '✅ الباركود جاهز! امسحه الآن.');
+        io.emit('log', '✅ الباركود جاهز!');
     }); 
 });
 
 client.on('ready', () => { 
-    io.emit('log', '🎉 البوت متصل وجاهز للعمل!');
+    io.emit('log', '🎉 البوت متصل!');
     io.emit('ready', 'Connected'); 
     console.log('Client is ready!');
 });
@@ -82,14 +90,13 @@ client.on('message_create', async msg => {
         
         if (msg.body.startsWith('✅') || msg.body.startsWith('📊')) return;
 
-        io.emit('log', `📩 رسالة جديدة: ${msg.body}`);
-        console.log(`Message received: ${msg.body}`); // طباعة في السيرفر للتأكد
+        io.emit('log', `📩 رسالة: ${msg.body}`);
         
         try {
             const gpt = await openai.chat.completions.create({
                 model: "gpt-4o",
                 messages: [
-                    { role: "system", content: 'أنت محاسب. إذا كانت إضافة مصروف رد JSON: {"type":"add","amount":0,"category":"","item":""}. إذا استعلام رد JSON: {"type":"query"}. تجاهل أي كلام آخر.' },
+                    { role: "system", content: 'أنت محاسب. إذا إضافة مصروف رد JSON: {"type":"add","amount":0,"category":"","item":""}. إذا استعلام رد JSON: {"type":"query"}.' },
                     { role: "user", content: msg.body }
                 ],
                 response_format: { type: "json_object" }
@@ -99,12 +106,12 @@ client.on('message_create', async msg => {
 
             if (action.type === 'add') {
                 await axios.post(SHEET_URL, action);
-                msg.reply(`✅ تم تسجيل ${action.amount} (${action.category})`);
+                msg.reply(`✅ ${action.amount} (${action.category})`);
             } 
             else if (action.type === 'query') {
                 const res = await axios.post(SHEET_URL, {type: "query"});
                 const data = res.data;
-                msg.reply(`📊 التقرير:\n- صرفت: ${data.spent}\n- باقي: ${data.remaining}\n- الميزانية: ${data.budget}`);
+                msg.reply(`📊 صرفت: ${data.spent} | باقي: ${data.remaining}`);
             }
 
         } catch (e) {
