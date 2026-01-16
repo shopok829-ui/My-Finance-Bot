@@ -11,11 +11,10 @@ const path = require('path');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const SHEET_URL = process.env.SHEET_URL; 
 
-// متغير لمنع التشغيل المزدوج
 let isClientInitialized = false;
 
+// إعدادات المتصفح
 const client = new Client({
-    // 🔴 التغيير هنا: حذفنا مسار dataPath لنستخدم الوضع المؤقت الآمن
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
@@ -26,9 +25,11 @@ const client = new Client({
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
-            '--single-process',
+            '--no-zygote',
+            '--single-process', 
             '--disable-gpu'
-        ]
+        ],
+        timeout: 60000 
     }
 });
 
@@ -39,38 +40,45 @@ app.get('/', (req, res) => {
 app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
-    console.log('User connected to UI');
+    socket.emit('log', '🔌 الواجهة متصلة..');
     
     socket.on('start_session', () => { 
         if (!isClientInitialized) {
-            console.log('Starting WhatsApp client...');
+            socket.emit('log', '🚀 جاري التشغيل.. انتظر دقيقة');
             isClientInitialized = true;
             client.initialize().catch(err => {
-                console.error("Initialization Error:", err);
-                isClientInitialized = false; // إعادة ضبط في حال الفشل
+                console.error("Init Error:", err);
+                isClientInitialized = false; 
             });
-        } else {
-            console.log('Client already running, ignoring start request.');
         }
     });
 });
 
 client.on('qr', (qr) => { 
-    console.log('QR Code received!');
     QRCode.toDataURL(qr, (err, url) => { 
         io.emit('qr', url); 
+        io.emit('log', '✅ الباركود جاهز! امسحه الآن.');
     }); 
 });
 
 client.on('ready', () => { 
-    console.log('Client is ready!');
+    io.emit('log', '🎉 البوت متصل وجاهز للعمل!');
     io.emit('ready', 'Connected'); 
 });
 
-client.on('message', async msg => {
+// 👇 التغيير الكبير هنا: message_create تسمع كل الرسائل (حتى رسائلك أنت)
+client.on('message_create', async msg => {
+    
+    // 🛑 شرط أمان: تجاهل رسائل البوت نفسه (التي تبدأ بـ ✅ أو 📊 أو ❌) لمنع التكرار اللانهائي
+    if (msg.body.startsWith('✅') || msg.body.startsWith('📊') || msg.body.startsWith('❌')) return;
+
     const chat = await msg.getChat();
+    
+    // التأكد أن الرسالة في قروب "مصاريف جواد"
     if (chat.isGroup && chat.name === "مصاريف جواد") {
-        io.emit('log', `📩 رسالة جديدة: ${msg.body}`);
+        
+        io.emit('log', `📩 رسالة مكتشفة: ${msg.body}`);
+        
         try {
             const gpt = await openai.chat.completions.create({
                 model: "gpt-4o",
@@ -85,20 +93,10 @@ client.on('message', async msg => {
 
             if (action.type === 'add') {
                 await axios.post(SHEET_URL, action);
+                // الرد على الرسالة
                 msg.reply(`✅ تم تسجيل ${action.amount} (${action.category})`);
             } 
             else if (action.type === 'query') {
                 const res = await axios.post(SHEET_URL, {type: "query"});
                 const data = res.data;
-                msg.reply(`📊 التقرير:\n- صرفت: ${data.spent}\n- باقي: ${data.remaining}\n- الميزانية: ${data.budget}`);
-            }
-
-        } catch (e) {
-            console.error(e);
-            io.emit('log', '❌ خطأ: ' + e.message);
-        }
-    }
-});
-
-const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => { console.log(`Running on ${PORT}`); });
+                msg.reply(`📊 التقرير:\n- صرفت: ${data.spent
