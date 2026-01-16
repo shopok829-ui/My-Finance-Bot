@@ -13,9 +13,11 @@ const SHEET_URL = process.env.SHEET_URL;
 
 let isClientInitialized = false;
 
-// إعدادات المتصفح الخاصة بالسيرفرات
+// إعدادات المتصفح بمواصفات "الصبر الطويل"
 const client = new Client({
     authStrategy: new LocalAuth(),
+    // 👇 هذا السطر الجديد يجعله ينتظر الربط للأبد ولا يفصل
+    authTimeoutMs: 0, 
     puppeteer: {
         headless: true,
         executablePath: '/usr/bin/google-chrome-stable',
@@ -29,37 +31,35 @@ const client = new Client({
             '--single-process', 
             '--disable-gpu'
         ],
-        timeout: 60000 
+        // 👇 وهنا أيضاً نلغي حد الوقت للمتصفح
+        timeout: 0 
     }
 });
 
-// صفحة الويب
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.use(express.static(__dirname));
 
-// إدارة الاتصال بالواجهة
 io.on('connection', (socket) => {
     socket.emit('log', '🔌 الواجهة متصلة..');
     
     socket.on('start_session', () => { 
         if (!isClientInitialized) {
-            socket.emit('log', '🚀 جاري التشغيل.. انتظر دقيقة');
+            socket.emit('log', '🚀 جاري بدء التشغيل (قد يستغرق دقيقتين)..');
             isClientInitialized = true;
             client.initialize().catch(err => {
                 console.error("Init Error:", err);
-                socket.emit('log', '❌ خطأ في التشغيل: ' + err.message);
+                socket.emit('log', '❌ خطأ: ' + err.message);
                 isClientInitialized = false; 
             });
         } else {
-             socket.emit('log', '⚠️ البوت يعمل بالفعل.. انتظر.');
+             socket.emit('log', '⚠️ البوت يعمل بالفعل.. راقب الجوال.');
         }
     });
 });
 
-// عند استلام الباركود
 client.on('qr', (qr) => { 
     QRCode.toDataURL(qr, (err, url) => { 
         io.emit('qr', url); 
@@ -67,29 +67,23 @@ client.on('qr', (qr) => {
     }); 
 });
 
-// عند الجاهزية
 client.on('ready', () => { 
     io.emit('log', '🎉 البوت متصل وجاهز للعمل!');
     io.emit('ready', 'Connected'); 
+    console.log('Client is ready!');
 });
 
-// استقبال الرسائل (بما فيها رسائلك أنت)
 client.on('message_create', async msg => {
-    
-    // تجاهل رسائل البوت نفسه
     if (msg.fromMe && (msg.body.startsWith('✅') || msg.body.startsWith('📊') || msg.body.startsWith('❌'))) return;
 
     const chat = await msg.getChat();
     
-    // التأكد أن الرسالة في قروب "مصاريف جواد"
     if (chat.isGroup && chat.name === "مصاريف جواد") {
         
-        // إذا كانت الرسالة من البوت نفسه (ردوده)، نتجاهلها حتى لا يدخل في حلقة مفرغة
-        // لكن نسمح برسائلك أنت (التي تعتبر fromMe = true أيضاً)
-        // الشرط هنا: إذا كانت الرسالة تبدأ بـ ✅ أو 📊 نتجاهلها فقط
         if (msg.body.startsWith('✅') || msg.body.startsWith('📊')) return;
 
         io.emit('log', `📩 رسالة جديدة: ${msg.body}`);
+        console.log(`Message received: ${msg.body}`); // طباعة في السيرفر للتأكد
         
         try {
             const gpt = await openai.chat.completions.create({
