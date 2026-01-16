@@ -6,18 +6,23 @@ const io = require('socket.io')(http);
 const OpenAI = require('openai');
 const QRCode = require('qrcode');
 const axios = require('axios');
+const path = require('path'); // مكتبة لتحديد المسارات بدقة
 
-// قراءة المتغيرات من إعدادات السيرفر
+// قراءة المتغيرات
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const SHEET_URL = process.env.SHEET_URL; 
 
 const client = new Client({
-    // هذا المسار مهم لحفظ الجلسة في سيرفرات ريندر
     authStrategy: new LocalAuth({ dataPath: '/opt/render/project/src/.wwebjs_auth' }),
     puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--single-process', '--disable-gpu']
     }
+});
+
+// هذا السطر هو الإصلاح 👇
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.use(express.static(__dirname));
@@ -29,17 +34,11 @@ io.on('connection', (socket) => {
 client.on('qr', (qr) => { QRCode.toDataURL(qr, (err, url) => { io.emit('qr', url); }); });
 client.on('ready', () => { io.emit('ready', 'Connected'); console.log('Ready!'); });
 
-// === استقبال الرسائل ===
 client.on('message', async msg => {
     const chat = await msg.getChat();
-    
-    // شرط: أن تكون الرسالة داخل قروب اسمه "مصاريف جواد"
     if (chat.isGroup && chat.name === "مصاريف جواد") {
-        
         io.emit('log', `📩 رسالة جديدة: ${msg.body}`);
-        
         try {
-            // 1. الذكاء الاصطناعي يحلل
             const gpt = await openai.chat.completions.create({
                 model: "gpt-4o",
                 messages: [
@@ -51,7 +50,6 @@ client.on('message', async msg => {
 
             const action = JSON.parse(gpt.choices[0].message.content);
 
-            // 2. التنفيذ عبر إرسال البيانات للرابط السحري للشيت
             if (action.type === 'add') {
                 await axios.post(SHEET_URL, action);
                 msg.reply(`✅ تم تسجيل ${action.amount} (${action.category})`);
