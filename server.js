@@ -12,11 +12,12 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const SHEET_URL = process.env.SHEET_URL; 
 
 let isClientInitialized = false;
+let isReady = false; // متغير لحفظ حالة الجاهزية
 
-// 1. إعدادات المتصفح الصبور (لحل الخطأ الأحمر)
 const client = new Client({
     authStrategy: new LocalAuth(),
-    authTimeoutMs: 0, // 👈 انتظار المصادقة للأبد (مهم جداً)
+    authTimeoutMs: 0, 
+    qrMaxRetries: 10,
     puppeteer: {
         headless: true,
         executablePath: '/usr/bin/google-chrome-stable',
@@ -30,40 +31,40 @@ const client = new Client({
             '--single-process', 
             '--disable-gpu'
         ],
-        timeout: 0 // 👈 انتظار المتصفح للأبد
+        timeout: 0 
     }
 });
 
-// 2. كود "النكز" (Keep-Alive) لمنع النوم
-app.get('/ping', (req, res) => {
-    res.status(200).send('Pong! I am alive.');
-});
+// صفحة البقاء حياً
+app.get('/ping', (req, res) => { res.status(200).send('Pong!'); });
 
-// نكز ذاتي كل 5 دقائق
-setInterval(() => {
-    console.log('⏰ Keep-Alive Ping...');
-    // هذا الكود يبقي المعالج نشطاً
-}, 300000); 
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
-    socket.emit('log', '🔌 الواجهة متصلة..');
+    socket.emit('log', '🔌 متصل بالواجهة..');
     
+    // إذا كان البوت جاهزاً مسبقاً، أخبر المتصفح فوراً
+    if (isReady) {
+        socket.emit('ready', 'Connected');
+        socket.emit('log', '✅ البوت متصل بالفعل!');
+    }
+
     socket.on('start_session', () => { 
         if (!isClientInitialized) {
-            socket.emit('log', '🚀 جاري التشغيل (وضع الصبر مفعل)..');
+            socket.emit('log', '🚀 جاري بدء المحرك..');
             isClientInitialized = true;
-            
-            client.initialize().catch(err => {
-                console.error("Init Error:", err);
-                socket.emit('log', '⚠️ إعادة المحاولة...');
-                isClientInitialized = false; 
-            });
+            try {
+                client.initialize().catch(err => {
+                    console.error("Init Error:", err);
+                    socket.emit('log', '❌ خطأ: ' + err.message);
+                    isClientInitialized = false; 
+                });
+            } catch (error) { isClientInitialized = false; }
+        } else if (isReady) {
+             socket.emit('ready', 'Connected');
+        } else {
+             socket.emit('log', '⏳ البوت يعمل في الخلفية، انتظر...');
         }
     });
 });
@@ -71,52 +72,57 @@ io.on('connection', (socket) => {
 client.on('qr', (qr) => { 
     QRCode.toDataURL(qr, (err, url) => { 
         io.emit('qr', url); 
-        io.emit('log', '✅ الباركود جاهز!');
+        io.emit('log', '📷 الباركود جديد.. امسحه الآن.');
     }); 
 });
 
+// أهم حدث: عند نجاح المسح
+client.on('authenticated', () => {
+    io.emit('log', '🔐 تم المسح بنجاح! جاري مزامنة البيانات (قد يستغرق دقيقة)..');
+    io.emit('authenticated', 'Auth Success'); // إشارة جديدة للشاشة
+    console.log('AUTHENTICATED');
+});
+
+client.on('auth_failure', msg => {
+    io.emit('log', '❌ فشل المصادقة: ' + msg);
+    console.error('AUTHENTICATION FAILURE', msg);
+});
+
 client.on('ready', () => { 
-    io.emit('log', '🎉 البوت متصل!');
+    isReady = true;
+    io.emit('log', '🎉 النظام جاهز كلياً!');
     io.emit('ready', 'Connected'); 
-    console.log('Client is ready!');
+    console.log('READY');
 });
 
 client.on('message_create', async msg => {
-    if (msg.fromMe && (msg.body.startsWith('✅') || msg.body.startsWith('📊') || msg.body.startsWith('❌'))) return;
-
+    if (msg.fromMe && (msg.body.startsWith('✅') || msg.body.startsWith('📊'))) return;
     const chat = await msg.getChat();
-    
     if (chat.isGroup && chat.name === "مصاريف جواد") {
-        
         if (msg.body.startsWith('✅') || msg.body.startsWith('📊')) return;
-
-        io.emit('log', `📩 رسالة: ${msg.body}`);
         
+        io.emit('log', `📩 رسالة: ${msg.body}`);
+        console.log(`Msg: ${msg.body}`);
+
         try {
             const gpt = await openai.chat.completions.create({
                 model: "gpt-4o",
                 messages: [
-                    { role: "system", content: 'أنت محاسب. إذا إضافة مصروف رد JSON: {"type":"add","amount":0,"category":"","item":""}. إذا استعلام رد JSON: {"type":"query"}.' },
+                    { role: "system", content: 'أنت محاسب. رد JSON فقط. Add: {"type":"add","amount":0,"category":"","item":""}. Query: {"type":"query"}.' },
                     { role: "user", content: msg.body }
                 ],
                 response_format: { type: "json_object" }
             });
 
             const action = JSON.parse(gpt.choices[0].message.content);
-
             if (action.type === 'add') {
                 await axios.post(SHEET_URL, action);
                 msg.reply(`✅ ${action.amount} (${action.category})`);
-            } 
-            else if (action.type === 'query') {
+            } else if (action.type === 'query') {
                 const res = await axios.post(SHEET_URL, {type: "query"});
-                const data = res.data;
-                msg.reply(`📊 صرفت: ${data.spent} | باقي: ${data.remaining}`);
+                msg.reply(`📊 مصروفاتك: ${res.data.spent} | المتبقي: ${res.data.remaining}`);
             }
-
-        } catch (e) {
-            console.error(e);
-        }
+        } catch (e) { console.error(e); }
     }
 });
 
