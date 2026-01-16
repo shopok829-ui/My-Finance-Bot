@@ -3,160 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>بوت المصاريف - لوحة التحكم</title>
+    <title>لوحة التحكم</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f0f2f5;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .container {
-            background: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 400px;
-            width: 90%;
-        }
-        h1 { color: #333; margin-bottom: 20px; font-size: 24px; }
-        
-        /* تصميم زر الربط */
-        #connect-btn {
-            background-color: #25D366;
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            font-size: 16px;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: 0.3s;
-            font-weight: bold;
-        }
-        #connect-btn:hover { background-color: #128C7E; }
-        #connect-btn:disabled { background-color: #ccc; cursor: not-allowed; }
-
-        /* منطقة الباركود */
-        #qr-container {
-            margin-top: 20px;
-            display: none; /* مخفي افتراضياً */
-        }
-        #qr-image {
-            width: 250px;
-            height: 250px;
-            border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 10px;
-        }
-
-        /* رسالة النجاح (مخفية افتراضياً) */
-        #success-container {
-            display: none;
-            margin-top: 20px;
-            padding: 20px;
-            border: 2px solid #25D366;
-            border-radius: 10px;
-            background-color: #e6ffed;
-        }
-        .success-icon { font-size: 50px; margin-bottom: 10px; display: block; }
-        .success-text { color: #075e54; font-weight: bold; font-size: 18px; }
-
-        /* سجل النظام (الكونسول الأسود) */
-        #log-box {
-            margin-top: 25px;
-            background: #1e1e1e;
-            color: #00ff00;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: monospace;
-            text-align: left;
-            font-size: 12px;
-            height: 100px;
-            overflow-y: auto;
-            direction: ltr;
-        }
+        body { font-family: sans-serif; background: #f0f2f5; text-align: center; padding: 20px; }
+        .box { background: white; padding: 30px; border-radius: 10px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        button { background: #25D366; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%; }
+        button:disabled { background: #ccc; }
+        #log { margin-top: 20px; background: #222; color: #0f0; padding: 10px; height: 150px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 12px; border-radius: 5px; direction: ltr; }
+        #qr-img { max-width: 100%; margin-top: 10px; display: none; border: 1px solid #ddd; }
+        .status { margin: 15px 0; font-weight: bold; color: #555; }
+        .success { color: #008000; display: none; font-size: 18px; border: 2px solid #008000; padding: 10px; border-radius: 10px; background: #eaffea; }
+        .loading { color: #dda005; display: none; font-size: 16px; margin-top: 10px;}
     </style>
 </head>
 <body>
-
-    <div class="container">
-        <h1>🤖 بوت المصاريف الذكي</h1>
+    <div class="box">
+        <h2>🤖 بوت المصاريف</h2>
+        <button id="btn" onclick="start()">🚀 تشغيل / ربط</button>
         
-        <button id="connect-btn" onclick="startSession()">🔗 ربط واتساب</button>
-
-        <div id="qr-container">
-            <p style="color: #666; margin-bottom: 10px;">امسح الكود أدناه بسرعة:</p>
-            <img id="qr-image" src="" alt="QR Code">
+        <div id="status-text" class="status">انتظار الأمر...</div>
+        
+        <div id="loading-msg" class="loading">
+            🔐 تم المسح بنجاح!<br>جاري مزامنة البيانات مع السيرفر...<br>⏳ انتظر دقيقة واحدة
         </div>
 
-        <div id="success-container">
-            <span class="success-icon">✅</span>
-            <span class="success-text">تم الاتصال بالواتساب بنجاح!</span>
-            <p style="color: #555; font-size: 14px; margin-top: 5px;">البوت يعمل وجاهز لاستقبال رسائلك.</p>
-        </div>
-
-        <div id="log-box">Waiting for action...</div>
+        <div id="success-msg" class="success">✅ تم الاتصال وجاهز للعمل!</div>
+        
+        <img id="qr-img" src="">
+        <div id="log">Logs will appear here...</div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        const logBox = document.getElementById('log-box');
-        const qrContainer = document.getElementById('qr-container');
-        const qrImage = document.getElementById('qr-image');
-        const connectBtn = document.getElementById('connect-btn');
-        const successContainer = document.getElementById('success-container');
+        const logDiv = document.getElementById('log');
+        const qrImg = document.getElementById('qr-img');
+        const btn = document.getElementById('btn');
+        const successMsg = document.getElementById('success-msg');
+        const loadingMsg = document.getElementById('loading-msg');
+        const statusText = document.getElementById('status-text');
 
-        // دالة لإضافة النصوص في الصندوق الأسود
-        socket.on('log', (msg) => {
-            const p = document.createElement('div');
-            p.textContent = '> ' + msg;
-            logBox.appendChild(p);
-            logBox.scrollTop = logBox.scrollHeight;
-        });
-
-        // عند استلام الباركود
-        socket.on('qr', (url) => {
-            // إخفاء رسالة النجاح (لو كانت ظاهرة)
-            successContainer.style.display = 'none';
-            // إظهار الباركود
-            qrContainer.style.display = 'block';
-            qrImage.src = url;
-            // تعطيل الزر لأنه جاري العمل
-            connectBtn.style.display = 'none';
-            logBox.style.border = "1px solid #ffff00"; // حدود صفراء للتنبيه
-        });
-
-        // 🔥 أهم نقطة: عند استلام إشارة الجاهزية (Ready)
-        socket.on('ready', (msg) => {
-            // 1. إخفاء الباركود فوراً
-            qrContainer.style.display = 'none';
-            // 2. إخفاء زر الربط
-            connectBtn.style.display = 'none';
-            // 3. إظهار رسالة النجاح الخضراء
-            successContainer.style.display = 'block';
-            
-            logBox.style.border = "1px solid #00ff00"; // حدود خضراء
-            addLog("✅ النظام متصل كلياً!");
-        });
-
-        function startSession() {
-            connectBtn.disabled = true;
-            connectBtn.textContent = "جاري التحميل...";
+        function start() {
+            btn.disabled = true;
+            btn.innerText = "جاري الاتصال...";
             socket.emit('start_session');
         }
 
-        function addLog(txt) {
-            const p = document.createElement('div');
-            p.textContent = '> ' + txt;
-            logBox.appendChild(p);
-        }
-    </script>
+        socket.on('log', (msg) => {
+            const div = document.createElement('div');
+            div.textContent = '> ' + msg;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        });
 
+        socket.on('qr', (url) => {
+            successMsg.style.display = 'none';
+            loadingMsg.style.display = 'none';
+            qrImg.style.display = 'block';
+            qrImg.src = url;
+            statusText.innerText = "امسح الباركود الآن";
+            btn.style.display = 'none';
+        });
+
+        // 🟡 عند نجاح المسح وقبل الجاهزية الكاملة
+        socket.on('authenticated', () => {
+            qrImg.style.display = 'none'; // إخفاء الباركود
+            loadingMsg.style.display = 'block'; // إظهار رسالة الانتظار
+            statusText.innerText = "جاري المزامنة...";
+        });
+
+        // 🟢 عند الجاهزية التامة
+        socket.on('ready', () => {
+            qrImg.style.display = 'none';
+            loadingMsg.style.display = 'none';
+            successMsg.style.display = 'block';
+            statusText.innerText = "متصل";
+            btn.style.display = 'none';
+        });
+    </script>
 </body>
 </html>
